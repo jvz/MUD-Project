@@ -1,0 +1,16 @@
+5
+Entryway
+WHat a nice room?
+-1 -1 2 -1
+Hallway
+WHat a nice room?
+-1 -1 3 -1
+Hallway
+WHat a nice room?
+-1 -1 4 -1
+Hallway
+WHat a nice room?
+-1 -1 5 -1
+Exit
+WHat a nice room?
+-1 -1 -1 -1
