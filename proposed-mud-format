@@ -96,7 +96,18 @@ in turn sends a NOTIFY code message to all users (*) with the message given.
 The server replies with the RPL_OK code to the user to indicate successful
 message delivery.
 
-PRIVMSG <nickname>
+WHISPER <nickname> <message>
+User sends a message (prefixed by a colon) to nickname if exists. If the
+username doesn't exist, the server replies with ERR_INVALIDNICK code. The
+nickname is sent a NOTIFY message from the server with the message in
+question prefixed with the nickname of the sender as part of the message.
+So for example, if the command "WHISPER Foo :This is a private message!" is
+sent by the user "Bar", then the server sends the message
+"100 Foo :Bar: This is a private message!" to the client "Bar" and sends the
+message RPL_OK code back to the sending user to indicate successful message
+delivery.
+
+CHAT <nickname>
 Initiates a private conversation with given nickname. If the nickname doesn't
 exist, the ERR_INVALIDNICK code is replied. If the nickname does exist, the
 server sends a QRY_LISTEN code with the initiating user's nickname to verify if
@@ -121,11 +132,11 @@ exist, the ERR_INVALIDNICK code is replied. If the nick hasn't made a PRIVMSG
 request to the user, then an ERR_NOREQUEST code is replied. If the nick did
 initiate a PRIVMSG request, then that nick is notifed with an ERR_IGNORED code.
 
-WHISPER <nickname> <message>
+PRIVMSG <nickname> <message>
 User sends a direct message to the given nickname. If the nickname doesn't
 exist, the ERR_INVALIDNICK code is replied. If the users are not already in a
 chat with each other, the ERR_NOTPAIRED code is replied (indicating that a
-PRIVMSG request should be sent before sending a message).
+CHAT request should be sent before sending a message).
 
 PART <nickname>
 User terminates a private chat with given nickname. If nickname doesn't exist,
