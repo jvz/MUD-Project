@@ -9,13 +9,24 @@ such where a space may be found in the message. Naturally, parameters can
 consist of any characters except for space, \r, \n, NUL, and can't begin with a
 colon unless it's the last parameter (or it will be interpretted as such).
 Commands are made up of letters (case-insensitive) or a 3-digit code. The
-3-digit code commands are only used for server responses. BNF representation of
-messages are as follows:
+3-digit code commands are only used for server responses. Messages can be
+prefixed with a colon followed by the nickname or server address of the client
+or server making the request to aid in resolving ambiguities regarding who or
+what may have sent the message. If the prefix is missing, the message should be
+parsed assuming that the connection that sent the message is the originator of
+the message. Thus, when the server is passing along messages from one user to
+another, it should add the originating user's nickname as a prefix if it's not
+already there. Naturally, the server should ignore a prefix from a client if
+it's not the client's nickname.
+
+BNF representation of messages are as follows:
 (note that {} means 0 or more occurences, [] means optional, () is for grouping,
 <> denote non-terminals, '' denote literal characters, and "" denote literal
 strings)
 
-<message>   ::= <command> <params> <crlf>
+<message>   ::= [ ':' <prefix> <SPACE> ] <command> <params> <crlf>
+<prefix>    ::= <nickname> | <server>
+<nickname>  ::= <letter> { <letter> | <number> }
 <command>   ::= <letter> { <letter> } | <number> <number> <number>
 <SPACE>     ::= ' ' { ' ' }
 <params>    ::= <SPACE> [ ':' <trailing> | <middle> <params> ]
@@ -24,13 +35,14 @@ strings)
 <trailing>  ::= <Any string (can be empty) except for \r, \n, and \0>
 <crlf>      ::= "\r\n"
 
+Note that all example commands given don't explicitly include the \r\n bit for
+the end of the message. Please remember that every message must be terminated
+with the carriage return, line feed pair!
+
 Every client has a nickname (or just nick) and a password. These two bits of
 information are established upon connection to the server using the following
 command:
 LOGIN <nickname> <password>
-The server can respond with the following codes where appropriate:
-ERR_NEEDMOREPARAMS, ERR_INVALIDNICK, ERR_INVALIDPASSWD, RPL_AUTHENTICATED,
-RPL_REGISTERED
 If the server has not encountered the nickname given, it is registered in its
 user database file with the password given, and then the server replies with
 the RPL_REGISTERED and RPL_AUTHENTICATED messages. If the nickname is
@@ -40,8 +52,18 @@ server replies with the ERR_INVALIDPASSWD code. And as with all commands, if
 not enough parameters are given, the ERR_NEEDMOREPARAMS code is replied.
 A nickname can consist only of letters and numbers, and must begin with a
 letter. If the nickname doesn't match this requirement, the server replies with
-the ERR_INVALIDNICK code. Invalid nicknames also include "self", "room", and
-"exits" as they are special users in the LOOK command.
+the ERR_INVALIDNICK code. Passwords can consist of any characters except any
+character that falls in the range of 0-31 (mostly non-printing characters) and
+the DEL character (127). This range covers the banned parameter characters as
+well as characters that would be rather hard to enter into a password dialog
+box as well. Note that the password parameter may be prefixed with a colon as
+it is the last parameter, and doing so would allow spaces in the password as
+well as enabling passwords to begin with a colon.
+For example, suppose a client wants to connect using the nickname "Broseph"
+with the password ":This is a long password!". Then the command sent by the
+client would be "LOGIN Broseph ::This is a long password!".
+This command should NOT be prefixed by the optional command prefix as it is
+redundant, unnecessary, and should be ignored by the server anyhow.
 
 Note that any command that doesn't specify an ERR_, QRY_, or RPL_ code in
 response should send a RPL_OK code to indicate success. If an improper number of
@@ -71,6 +93,9 @@ number specified does not exist, an ERR_INVALIDROOM code is replied.
 If this message is sent by the server, it will use the NOTIFY code as its
 command. Clients that are affected by the command will be sent the message along
 with the recipient to indicate what type of notification it is.
+Whether or not a client should be able to send a message to a room he is not in
+remains a question of whether or not rooms should be private. As it stands,
+this is allowed, but discouraged as it ruins the immersion!
 
 MOVE <direction>
 User moves in the direction specified as one of "north", "south", "east", or
@@ -88,24 +113,26 @@ SAY <message>
 User sends a message (prefixed by colon as usual) to the current room he is in.
 Server sends a NOTIFY code message in response to the room the user is in
 containing the message given. The server also replies to the client with RPL_OK
-to indicate the message has been delivered successfully.
+to indicate the message has been delivered successfully. This command is
+synonymous with ":<self> NOTIFY <room> <message>" using the user's current room.
 
 YELL <message>
 User sends a message (prefixed by colon) to all users on the server. The server
 in turn sends a NOTIFY code message to all users (*) with the message given.
 The server replies with the RPL_OK code to the user to indicate successful
-message delivery.
+message delivery. This command is synonymous with ":<self> NOTIFY * <message>".
 
 WHISPER <nickname> <message>
 User sends a message (prefixed by a colon) to nickname if exists. If the
 username doesn't exist, the server replies with ERR_INVALIDNICK code. The
 nickname is sent a NOTIFY message from the server with the message in
-question prefixed with the nickname of the sender as part of the message.
+question prefixed with the nickname of the sender as with all user-origin
+server messages.
 So for example, if the command "WHISPER Foo :This is a private message!" is
 sent by the user "Bar", then the server sends the message
-"100 Foo :Bar: This is a private message!" to the client "Bar" and sends the
-message RPL_OK code back to the sending user to indicate successful message
-delivery.
+":Bar 100 Foo :This is a private message!" to the client "Foo" and sends the
+message RPL_OK code back to "Bar" to indicate successful message delivery.
+This command is synonymous with ":<self> NOTIFY <nickname> <message>".
 
 CHAT <nickname>
 Initiates a private conversation with given nickname. If the nickname doesn't
@@ -114,17 +141,18 @@ server sends a QRY_LISTEN code with the initiating user's nickname to verify if
 the user wishes to talk to the originating user. The receiving user can respond
 with a LISTEN command to accept the chat, or an IGNORE command to reject the
 chat. If the user accepts the chat, the server replies with RPL_LISTENING code
-to the originating user to indicate the chat is now in session. If the user
-rejects the chat, the server replies with ERR_IGNORED code to the originating
-user.
+to the originating user to indicate the user is ready to accept a direct
+connection along with the connection details. If the user rejects the chat,
+the server replies with ERR_IGNORED code to the originating user.
 
-LISTEN <nickname>
-Accepts a private message request from nickname. If the nickname supplied
-doesn't exist, the ERR_INVALIDNICK code is replied. If the nickname hasn't made
-a PRIVMSG request to the user, then an ERR_NOREQUEST code is replied. If the
-nickname has initiated a PRIVMSG request, then that nickname is sent a
-RPL_LISTENING code with the user's nickname to indicate the chat has been
-accepted.
+LISTEN <nickname> <port>
+Accepts a private message request from nickname on the specified port number.
+If the nickname supplied doesn't exist, the ERR_INVALIDNICK code is replied.
+If the nickname hasn't made a PRIVMSG request to the user, then an
+ERR_NOREQUEST code is replied. If the nickname has initiated a PRIVMSG request,
+then that nickname is sent a RPL_LISTENING code with the user's nickname, IP
+address, and port number to indicate the chat has been accepted and the user's
+client is ready to accept a direct connection on the given port.
 
 IGNORE <nickname>
 Rejects a private message request from nickname. If the nick supplied doesn't
@@ -132,30 +160,30 @@ exist, the ERR_INVALIDNICK code is replied. If the nick hasn't made a PRIVMSG
 request to the user, then an ERR_NOREQUEST code is replied. If the nick did
 initiate a PRIVMSG request, then that nick is notifed with an ERR_IGNORED code.
 
-PRIVMSG <nickname> <message>
-User sends a direct message to the given nickname. If the nickname doesn't
-exist, the ERR_INVALIDNICK code is replied. If the users are not already in a
-chat with each other, the ERR_NOTPAIRED code is replied (indicating that a
-CHAT request should be sent before sending a message).
-
-PART <nickname>
-User terminates a private chat with given nickname. If nickname doesn't exist,
-the ERR_INVALIDNICK code is replied. The nick is sent a ERR_PARTED code
-to indicate the conversation was terminated.
+PRIVMSG <message>
+This message is ONLY sent between directly connected clients. This is for
+sending private messages via the direct chat. No return codes are sent back
+after the message. Clients should prefix the command with the client's nickname
+for convenience purposes since the server won't be providing it if absent.
+This is particularly useful if a client wishes to reuse the same connection
+for multiple direct connection chats and needs a way to distinguish the
+different sending clients.
 
 QUIT [<message>]
 User disconnects from server with optional message as a leaving message. This is
 notified to all users connected to the server. If no message is given, the
-default message is provided as "Leaving...".
+default message is provided as "Leaving...". This command is also used in a
+client-client direct connection to terminate the connection using the same
+semantics as a server QUIT.
 
-LOOK (<nickname> | "self" | "room" | "exits")
-Gets information about something. If "self" is supplied, this is a synonym for
+LOOK (<nickname> | "@self" | "@room" | "@exits")
+Gets information about something. If "@self" is supplied, this is a synonym for
 the user's nickname. If a nickname doesn't exist, the ERR_INVALIDNICK code is
 replied. If the nickname specified isn't in the same room as the user, then the
 ERR_NOTINROOM code is replied. Information returned about a nickname are its
-long description sent via a RPL_LONGDESC code. If "exits" is supplied, then a
+long description sent via a RPL_LONGDESC code. If "@exits" is supplied, then a
 RPL_ROOMEXITS code is replied with the room number and its list of exits.
-If "room" is supplied, then the following responses are sent:
+If "@room" is supplied, then the following responses are sent:
 RPL_ROOMINFO <room number>
 RPL_ROOMNAME <room name>
 RPL_ROOMDESC <room description>
@@ -169,11 +197,15 @@ Reply Code List
 Note that the response codes can take parameters, and they usually end with a
 trailing parameter to indicate some sort of informative message about the code.
 Some take parameters (usually a nickname) to indicate what the code applies to.
+Also note that all reply codes are only sent by the server, and every server
+message must be prefixed with the originating nickname of the message if it is
+one that is being passed along from a user, or the server address if the
+message is coming from the server directly (all other cases).
 
 100 - NOTIFY - server notification message. Follows format of NOTIFY command.
 
 200 - RPL_OK - command was executed successfully (general response when there
-               aren't specific response codes for success)
+               aren't specific response codes for success).
 201 - RPL_AUTHENTICATED - user was authenticated and is now logged in.
 202 - RPL_REGISTERED - user successfully registered.
 203 - RPL_NEWROOM - user successfully moved to room number specified in response.
@@ -181,17 +213,19 @@ Some take parameters (usually a nickname) to indicate what the code applies to.
                       the short description of the user.
 205 - RPL_LONGDESC - first param is the nickname, then the trailing param is
                      the long description of the user.
-206 - RPL_LISTENING - nickname given is now listening to private chat with user.
+206 - RPL_LISTENING - first param is nickname of accepting user, second param is
+                      the IP address of the user, third param is the port.
 207 - RPL_USERINFO - nickname plus trailing param of its long description.
 208 - RPL_ROOMEXITS - room number plus list of exits (north/south/east/west) as
                       its parameters.
-209 - RPL_ROOMINFO - room number, beginning of info listing for room
-210 - RPL_ROOMNAME - trailing param giving the name of the room
-211 - RPL_ROOMDESC - trailing param giving the room description
-212 - RPL_ENDROOMINFO - room number, ending of info listing for room
+209 - RPL_ROOMINFO - room number, beginning of info listing for room.
+210 - RPL_ROOMNAME - trailing param giving the name of the room.
+211 - RPL_ROOMDESC - trailing param giving the room description.
+212 - RPL_ENDROOMINFO - room number, ending of info listing for room.
 
 300 - QRY_LISTEN - nickname given as param is requesting a private chat.
 
+400 - ERR_UNKNOWNCOMMAND - command given is unrecognised.
 401 - ERR_NEEDMOREPARAMS - command received did not contain enough parameters.
 402 - ERR_INVALIDPASSWD - user credentials don't match.
 403 - ERR_INVALIDNICK - nickname is unacceptable or nonexistent.
@@ -199,9 +233,5 @@ Some take parameters (usually a nickname) to indicate what the code applies to.
 405 - ERR_INVALIDMOVE - user cannot move in the direction specified.
 406 - ERR_IGNORED - user has rejected private chat and won't receive any private
                     messages sent to him.
-407 - ERR_NOTPAIRED - user cannot send a private message to a user that hasn't
-                      yet accepted a private message request.
-408 - ERR_NOREQUEST - user has not requested a private conversation.
-409 - ERR_PARTED - user specified has ended a private conversation.
-410 - ERR_NOTINROOM - user specified is not in the same room as the user.
-411 - ERR_UNKNOWNCOMMAND - command given is unrecognised
+407 - ERR_NOTINROOM - user specified is not in the same room as the user.
+
